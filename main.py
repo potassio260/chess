@@ -8,8 +8,6 @@ def main():
     mode, colour = ui.show_intro_screen()
     game = Chess(ui, mode, colour)
 
-
-
 # Start Game
 if __name__ == '__main__':
     main()

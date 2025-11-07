@@ -2,7 +2,7 @@ import pygame
 
 class Piece():
     def __init__(self, name, colour):
-        self.name = name
+        self.piece_type = name
         self.colour = colour
         self.has_moved = False
         
