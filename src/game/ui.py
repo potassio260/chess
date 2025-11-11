@@ -167,7 +167,7 @@ class GameUI():
             pygame.display.flip()
             self.Clock.tick(60)
 
-    def run(self, board: dict, turn: str):
+    def run(self, board: dict, turn: str, game):
         running, dragging = True, False
         start_pos, clicked_pos = None, None
         
@@ -219,7 +219,11 @@ class GameUI():
 
             # Update the screen every frame
             self.update_screen(board=board)
-            self.Screen.blit(self.Surface, (0,0))
+            if start_pos:
+                piece = board[start_pos]["piece"]
+                if piece:
+                    if piece.colour == turn:
+                        self.draw_possible_moves(game, start_pos)
             pygame.display.flip()
             self.Clock.tick(60)
 
@@ -227,6 +231,26 @@ class GameUI():
         self.draw_board(board=board)
         self.draw_pieces(board=board, piece_to_move=self.piece_moving)
     
+    def draw_possible_moves(self, game, square):
+        if square is None:
+            return
+        
+        possible_moves = game.piece_moves(square, game.chessboard)
+        
+        for move in possible_moves:
+            destination = move[1]
+            
+            if destination in game.chessboard:
+                move_square = game.chessboard[destination]["square"]
+                if game.chessboard[destination]["piece"] is None:
+                    temp_surface = pygame.Surface((22, 22), pygame.SRCALPHA)
+                    pygame.draw.circle(temp_surface, (90, 90, 90, 128), (11, 11), 11)
+                    self.Screen.blit(temp_surface, (move_square.centerx - 11, move_square.centery - 11))
+                else:
+                    temp_surface = pygame.Surface((70, 70), pygame.SRCALPHA)
+                    pygame.draw.circle(temp_surface, (90, 90, 90, 128), (35, 35), 35, 4)
+                    self.Screen.blit(temp_surface, (move_square.centerx - 35, move_square.centery - 35))
+
     def draw_board(self, board: dict):
         squares = [s["square"] for s in board.values()]
         curr_colour = self.green_rgb

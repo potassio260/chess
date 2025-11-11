@@ -1,3 +1,4 @@
+# Imports
 import pygame
 
 class Piece():

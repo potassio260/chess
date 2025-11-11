@@ -2,6 +2,7 @@
 from .ui import GameUI
 from .board import ChessBoard
 from .pieces import Piece
+from ai.model import Bot
 import pygame, random
 
 # Chess 
@@ -52,7 +53,7 @@ class Chess():
                 if self.player_colour == self.player_turn: 
                     # Human move
                     legal_moves = self.all_possible_moves(colour=self.player_turn, board=self.chessboard)
-                    sourceSquare, targetSquare = self.ui.run(board=self.chessboard, turn=self.player_turn)
+                    sourceSquare, targetSquare = self.ui.run(board=self.chessboard, turn=self.player_turn, game=self)
                     if sourceSquare and targetSquare:
                         is_valid_move = self.validate_move(sourceSquare, targetSquare)
 
@@ -61,7 +62,7 @@ class Chess():
                         case 'local':
                             # Human move
                             legal_moves = self.all_possible_moves(colour=self.player_turn, board=self.chessboard)
-                            sourceSquare, targetSquare = self.ui.run(board=self.chessboard, turn=self.player_turn)
+                            sourceSquare, targetSquare = self.ui.run(board=self.chessboard, turn=self.player_turn, game=self)
                             if sourceSquare and targetSquare:
                                 is_valid_move = self.validate_move(sourceSquare, targetSquare)
 
@@ -313,6 +314,16 @@ class Chess():
             }
         return board_copy
     
+    def piece_moves(self, square, board):
+        if square is None:
+            return []
+        legal_moves = []
+        moves = self.get_pseudo_legal_moves(square, board)
+        for target in moves:
+            if self.is_legal_move(square, target, board):
+                legal_moves.append((square, target))
+        return legal_moves
+
     def is_legal_move(self, source, target, board):
         # Make the move on a copy of the board
         test_board = self.copy_board_state(board)
@@ -348,7 +359,7 @@ class Chess():
         for sq, sq_data in board.items():
             piece = sq_data['piece']
             if piece and piece.colour == attacker_colour:
-                # Get moves for this piece (without checking for check to avoid recursion)
+                # Get moves for this piece
                 if piece.piece_type == 'Pawn':
                     # Pawns attack diagonally
                     file, rank = self.square_to_coords(sq)
@@ -400,7 +411,7 @@ class Chess():
             pygame.draw.rect(self.ui.Surface, (0, 0, 0), rect, 2)
             self.ui.update_screen(board=self.chessboard)
 
-            # Draw the promotion choices (reversed if bottom)
+            # Draw the promotion choices
             rectangles = self.pawn_promotion_ui(rect, piece.colour, reverse_images)
             pygame.display.update()
 
