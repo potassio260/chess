@@ -11,6 +11,8 @@ The engine accurately handles all complex edge cases of chess, and the long-term
 - **Visual Feedback:** Interactive UI with legal move highlighting and clean graphics.
 - **AI Sandbox (WIP):** Groundwork laid for plugging in custom AI agents.
 
+    <img src="screenshots/enpassant.gif" width="400"/>
+                   
 ## Tech Stack
 
 - **Language:** Python
