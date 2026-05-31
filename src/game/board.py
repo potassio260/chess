@@ -42,7 +42,6 @@ class ChessBoard():
         # Flip the board if playing as black
         if player_1 == 'white':
             ranks = ranks[::-1] 
-            files = files[::-1]
         
         chessboard = {}
         for rank_index, rank in enumerate(ranks):

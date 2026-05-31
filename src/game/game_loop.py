@@ -386,30 +386,19 @@ class Chess():
         x_pos, y_pos = square.topleft
 
         if promoteToValue is None:
-            # Determine promotion UI position
-            if self.player_colour == "white":
-                if piece.colour == "white":
-                    # White player promoting at top
-                    rect = pygame.Rect(x_pos, 640 - 80 * 4, 80, 80 * 4)
-                    reverse_images = True
-                else:
-                    # Black pawn promoting at bottom
-                    rect = pygame.Rect(x_pos, 0, 80, 80 * 4)
-                    reverse_images = False
-            else:  # player_colour == "black"
-                if piece.colour == "black":
-                    # Black player promoting at bottom
-                    rect = pygame.Rect(x_pos, 0, 80, 80 * 4)
-                    reverse_images = False
-                else:
-                    # White pawn promoting at top
-                    rect = pygame.Rect(x_pos, 640 - 80 * 4, 80, 80 * 4)
-                    reverse_images = True
+            # If pawn is near the top of the screen, menu goes DOWN
+            # If pawn is near the bottom, menu goes UP
+            if y_pos < 320:
+                rect = pygame.Rect(x_pos, y_pos, 80, 80 * 4)
+                reverse_images = False
+            else:
+                rect = pygame.Rect(x_pos, y_pos - 80 * 3, 80, 80 * 4)
+                reverse_images = True
 
             # Draw promotion area
-            pygame.draw.rect(self.ui.Surface, (255, 255, 255), rect)
-            pygame.draw.rect(self.ui.Surface, (0, 0, 0), rect, 2)
             self.ui.update_screen(board=self.chessboard)
+            pygame.draw.rect(self.ui.Screen, (255, 255, 255), rect)
+            pygame.draw.rect(self.ui.Screen, (0, 0, 0), rect, 2)
 
             # Draw the promotion choices
             rectangles = self.pawn_promotion_ui(rect, piece.colour, reverse_images)
@@ -457,7 +446,6 @@ class Chess():
             new_piece_type = promoteToValue.lower()
 
         self.chessboard[targetSquare]['piece'] = NEW_piece
-        self.ui.Surface = pygame.Surface((640, 640), pygame.SRCALPHA)
         self.ui.update_screen(board=self.chessboard)
         pygame.display.update()
         return new_piece_type
@@ -468,10 +456,6 @@ class Chess():
         image_path = r"assets"
         piece_names = ["queen", "knight", "bishop", "rook"]
 
-        # Reverse the order if promotion happens at bottom
-        if reverse_images:
-            piece_names = list(reversed(piece_names))
-
         pieces = [
             pygame.image.load(f"{image_path}/{name}_{colour}.png").convert_alpha()
             for name in piece_names
@@ -479,13 +463,16 @@ class Chess():
 
         x_pos, y_pos = rect.topleft
 
-        for piece_image in pieces:
-            square_rect = pygame.Rect(x_pos, y_pos, 80, 80)
+        if reverse_images:
+            positions = [rect.bottom - 80 * (i + 1) for i in range(4)]
+        else:
+            positions = [rect.top + 80 * i for i in range(4)]
+
+        for i, piece_image in enumerate(pieces):
+            square_rect = pygame.Rect(x_pos, positions[i], 80, 80)
             piece_rect = piece_image.get_rect(center=square_rect.center)
-            self.ui.Surface.blit(piece_image, piece_rect)
-            self.ui.Screen.blit(self.ui.Surface, (0, 0))
+            self.ui.Screen.blit(piece_image, piece_rect)
             temp_list.append(square_rect)
-            y_pos += 80
 
         return temp_list
 
