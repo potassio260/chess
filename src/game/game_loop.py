@@ -2,7 +2,7 @@
 from .ui import GameUI
 from .board import ChessBoard
 from .pieces import Piece
-from ai.model import Bot
+#from ai.model import Bot
 import pygame, random
 
 # Chess 
