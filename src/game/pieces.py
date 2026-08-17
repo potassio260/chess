@@ -41,4 +41,4 @@ class Piece():
         self.hitbox = self.img.get_rect()
     
     def __repr__(self):
-        return f"{self.colour} {self.name}"
+        return f"{self.colour} {self.piece_type}"

@@ -2,8 +2,13 @@
 from .ui import GameUI
 from .board import ChessBoard
 from .pieces import Piece
-#from ai.model import Bot
-import pygame, random
+from src.ai.model import RandoBot, ValueBot, SelfAwareBot, FutureSightBot
+from src.ai.stopium import Stopium
+import pygame, random, time
+
+# Sentinel meaning "use the live game state". None can't be the default here
+# because None is a real en passant value - it means "nothing is capturable"
+USE_LIVE_STATE = object()
 
 # Chess 
 class Chess():
@@ -19,6 +24,10 @@ class Chess():
         self.move_history = []
         self.mode = mode
         self.player_colour = colour
+        
+        # TEMP
+        if self.mode == 'bot':
+            self.bot = Stopium()
 
         # Set player colour
         if self.player_colour is None:
@@ -50,13 +59,13 @@ class Chess():
                     quit()
                 
                 # check who is next to move
-                if self.player_colour == self.player_turn: 
+                if self.player_colour == self.player_turn:
                     # Human move
                     legal_moves = self.all_possible_moves(colour=self.player_turn, board=self.chessboard)
                     sourceSquare, targetSquare = self.ui.run(board=self.chessboard, turn=self.player_turn, game=self)
                     if sourceSquare and targetSquare:
                         is_valid_move = self.validate_move(sourceSquare, targetSquare)
-
+                                         
                 else:
                     match self.mode:
                         case 'local':
@@ -70,7 +79,11 @@ class Chess():
                             pass
 
                         case 'bot':
-                            pass
+                            # Bot move
+                            legal_moves = self.all_possible_moves(colour=self.player_turn, board=self.chessboard)
+                            sourceSquare, targetSquare = self.bot.generate_move(board=self.chessboard, possible_moves=legal_moves, turn=self.player_turn, game=self)
+                            if sourceSquare and targetSquare:
+                                is_valid_move = self.validate_move(sourceSquare, targetSquare)
                         
             # Save move in history
             self.move_history.append((sourceSquare, targetSquare))
@@ -104,39 +117,39 @@ class Chess():
         
         return False
     
-    def all_possible_moves(self, colour, board):
+    def all_possible_moves(self, colour, board, en_passant=USE_LIVE_STATE, castling=USE_LIVE_STATE):
         legal_moves = []
-        
+
         # Iterate through all squares
         for square, square_data in board.items():
             piece_obj = square_data['piece']
-            
+
             # Skip empty squares and opponent pieces
             if piece_obj is None or piece_obj.colour != colour:
                 continue
-            
+
             # Generate pseudo-legal moves for this piece
-            pseudo_legal = self.get_pseudo_legal_moves(square, board)
-            
+            pseudo_legal = self.get_pseudo_legal_moves(square, board, en_passant=en_passant, castling=castling)
+
             # Filter out moves that leave king in check
             for target in pseudo_legal:
-                if self.is_legal_move(square, target, board):
+                if self.is_legal_move(square, target, board, en_passant=en_passant, castling=castling):
                     legal_moves.append((square, target))
-        
+
         return legal_moves
     
-    def get_pseudo_legal_moves(self, square, board, include_castling=True):
+    def get_pseudo_legal_moves(self, square, board, include_castling=True, en_passant=USE_LIVE_STATE, castling=USE_LIVE_STATE):
         piece_obj = board[square]['piece']
         if piece_obj is None:
             return []
-        
+
         piece_type = piece_obj.piece_type
         colour = piece_obj.colour
         moves = []
-        
+
         match piece_type:
             case 'Pawn':
-                moves = self.get_pawn_moves(square, colour, board)
+                moves = self.get_pawn_moves(square, colour, board, en_passant)
             case 'Knight':
                 moves = self.get_knight_moves(square, colour, board)
             case 'Bishop':
@@ -146,11 +159,14 @@ class Chess():
             case 'Queen':
                 moves = self.get_queen_moves(square, colour, board)
             case 'King':
-                moves = self.get_king_moves(square, colour, board, include_castling)
-        
+                moves = self.get_king_moves(square, colour, board, include_castling, en_passant, castling)
+
         return moves
-    
-    def get_pawn_moves(self, square, colour, board):
+
+    def get_pawn_moves(self, square, colour, board, en_passant=USE_LIVE_STATE):
+        if en_passant is USE_LIVE_STATE:
+            en_passant = self.en_passant_square
+
         file, rank = self.square_to_coords(square)
         moves = []
         direction = 1 if colour == 'white' else -1
@@ -180,10 +196,10 @@ class Chess():
                     moves.append(target_square)
         
         # En passant
-        if self.en_passant_square:
-            ep_file, ep_rank = self.square_to_coords(self.en_passant_square)
+        if en_passant:
+            ep_file, ep_rank = self.square_to_coords(en_passant)
             if rank + direction == ep_rank and abs(file - ep_file) == 1:
-                moves.append(self.en_passant_square)
+                moves.append(en_passant)
         
         return moves
     
@@ -232,7 +248,10 @@ class Chess():
         return self.get_sliding_moves(square, colour, board, 
                                        [(-1,-1), (-1,1), (1,-1), (1,1), (-1,0), (1,0), (0,-1), (0,1)])
     
-    def get_king_moves(self, square, colour, board, include_castling=True):
+    def get_king_moves(self, square, colour, board, include_castling=True, en_passant=USE_LIVE_STATE, castling=USE_LIVE_STATE):
+        if castling is USE_LIVE_STATE:
+            castling = self.castling_rights
+
         file, rank = self.square_to_coords(square)
         moves = []
         
@@ -249,20 +268,20 @@ class Chess():
                         moves.append(target_square)
         
         # Castling (only when generating actual moves, not checking attacks)
-        if include_castling and not self.is_in_check(colour, board):
+        if include_castling and not self.is_in_check(colour, board, en_passant, castling):
             # Kingside castling
-            if self.castling_rights[colour]['kingside']:
-                if self.can_castle_kingside(colour, board):
+            if castling[colour]['kingside']:
+                if self.can_castle_kingside(colour, board, en_passant, castling):
                     moves.append(self.coords_to_square(file + 2, rank))
-            
+
             # Queenside castling
-            if self.castling_rights[colour]['queenside']:
-                if self.can_castle_queenside(colour, board):
+            if castling[colour]['queenside']:
+                if self.can_castle_queenside(colour, board, en_passant, castling):
                     moves.append(self.coords_to_square(file - 2, rank))
         
         return moves
     
-    def can_castle_kingside(self, colour, board):
+    def can_castle_kingside(self, colour, board, en_passant=USE_LIVE_STATE, castling=USE_LIVE_STATE):
         rank = 0 if colour == 'white' else 7
         
         # Check squares are empty
@@ -278,12 +297,12 @@ class Chess():
             target_square = self.coords_to_square(file, rank)
             test_board[target_square]['piece'] = board[e_square]['piece']
             test_board[e_square]['piece'] = None
-            if self.is_square_attacked(target_square, colour, test_board):
+            if self.is_square_attacked(target_square, colour, test_board, en_passant, castling):
                 return False
         
         return True
     
-    def can_castle_queenside(self, colour, board):
+    def can_castle_queenside(self, colour, board, en_passant=USE_LIVE_STATE, castling=USE_LIVE_STATE):
         rank = 0 if colour == 'white' else 7
         
         # Check squares are empty
@@ -300,7 +319,7 @@ class Chess():
             target_square = self.coords_to_square(file, rank)
             test_board[target_square]['piece'] = board[e_square]['piece']
             test_board[e_square]['piece'] = None
-            if self.is_square_attacked(target_square, colour, test_board):
+            if self.is_square_attacked(target_square, colour, test_board, en_passant, castling):
                 return False
         
         return True
@@ -313,46 +332,133 @@ class Chess():
                 'piece': square_data['piece']
             }
         return board_copy
+
+    def copy_castling_rights(self, castling=USE_LIVE_STATE):
+        if castling is USE_LIVE_STATE:
+            castling = self.castling_rights
+        return {colour: rights.copy() for colour, rights in castling.items()}
+
+    # Piece objects are shared between boards, so a promotion in a simulated
+    # line must never edit one - reuse a cached piece per type and colour instead
+    _simulated_pieces = {}
+
+    def simulated_piece(self, name, colour):
+        piece = self._simulated_pieces.get((name, colour))
+        if piece is None:
+            piece = Piece(name, colour)
+            self._simulated_pieces[(name, colour)] = piece
+        return piece
+
+    # Apply a move to a copy of the position and hand back the whole resulting
+    # state, so a bot can search replies without touching the real game
+    def simulate_move(self, sourceSquare, targetSquare, board, en_passant=USE_LIVE_STATE, castling=USE_LIVE_STATE, promote_to='Queen'):
+        if en_passant is USE_LIVE_STATE:
+            en_passant = self.en_passant_square
+
+        new_board = self.copy_board_state(board)
+        new_castling = self.copy_castling_rights(castling)
+        piece_obj = new_board[sourceSquare]['piece']
+        if piece_obj is None:
+            return new_board, None, new_castling
+
+        colour = piece_obj.colour
+        opponent = 'black' if colour == 'white' else 'white'
+        source_file, source_rank = self.square_to_coords(sourceSquare)
+        target_file, target_rank = self.square_to_coords(targetSquare)
+
+        # En passant capture removes the pawn beside the target, not on it
+        if piece_obj.piece_type == 'Pawn' and targetSquare == en_passant:
+            captured_pawn_square = self.coords_to_square(target_file, source_rank)
+            new_board[captured_pawn_square]['piece'] = None
+
+        # Only a double pawn push leaves a square capturable next move
+        new_en_passant = None
+        if piece_obj.piece_type == 'Pawn' and abs(target_rank - source_rank) == 2:
+            mid_rank = (source_rank + target_rank) // 2
+            new_en_passant = self.coords_to_square(source_file, mid_rank)
+
+        # Castling moves the rook too, and gives up both rights
+        if piece_obj.piece_type == 'King':
+            if abs(target_file - source_file) == 2:
+                if target_file > source_file:
+                    rook_source = self.coords_to_square(7, source_rank)
+                    rook_target = self.coords_to_square(5, source_rank)
+                else:
+                    rook_source = self.coords_to_square(0, source_rank)
+                    rook_target = self.coords_to_square(3, source_rank)
+                new_board[rook_target]['piece'] = new_board[rook_source]['piece']
+                new_board[rook_source]['piece'] = None
+
+            new_castling[colour]['kingside'] = False
+            new_castling[colour]['queenside'] = False
+
+        # Moving a rook gives up that side's rights
+        if piece_obj.piece_type == 'Rook':
+            if source_file == 0:
+                new_castling[colour]['queenside'] = False
+            elif source_file == 7:
+                new_castling[colour]['kingside'] = False
+
+        # Capturing a rook gives up the opponent's rights on that side
+        captured_piece = new_board[targetSquare]['piece']
+        if captured_piece and captured_piece.piece_type == 'Rook':
+            if target_file == 0:
+                new_castling[opponent]['queenside'] = False
+            elif target_file == 7:
+                new_castling[opponent]['kingside'] = False
+
+        # Make the move
+        new_board[targetSquare]['piece'] = piece_obj
+        new_board[sourceSquare]['piece'] = None
+
+        # Promotion
+        if piece_obj.piece_type == 'Pawn' and target_rank in (0, 7):
+            new_board[targetSquare]['piece'] = self.simulated_piece(promote_to, colour)
+
+        return new_board, new_en_passant, new_castling
     
-    def piece_moves(self, square, board):
+    def piece_moves(self, square, board, en_passant=USE_LIVE_STATE, castling=USE_LIVE_STATE):
         if square is None:
             return []
         legal_moves = []
-        moves = self.get_pseudo_legal_moves(square, board)
+        moves = self.get_pseudo_legal_moves(square, board, en_passant=en_passant, castling=castling)
         for target in moves:
-            if self.is_legal_move(square, target, board):
+            if self.is_legal_move(square, target, board, en_passant=en_passant, castling=castling):
                 legal_moves.append((square, target))
         return legal_moves
 
-    def is_legal_move(self, source, target, board):
+    def is_legal_move(self, source, target, board, en_passant=USE_LIVE_STATE, castling=USE_LIVE_STATE):
+        if en_passant is USE_LIVE_STATE:
+            en_passant = self.en_passant_square
+
         # Make the move on a copy of the board
         test_board = self.copy_board_state(board)
         piece_obj = test_board[source]['piece']
         colour = piece_obj.colour
-        
+
         # Handle en passant capture
-        if piece_obj.piece_type == 'Pawn' and target == self.en_passant_square:
+        if piece_obj.piece_type == 'Pawn' and target == en_passant:
             source_file, source_rank = self.square_to_coords(source)
             target_file, target_rank = self.square_to_coords(target)
             captured_pawn_square = self.coords_to_square(target_file, source_rank)
             test_board[captured_pawn_square]['piece'] = None
-        
+
         # Make the move
         test_board[target]['piece'] = piece_obj
         test_board[source]['piece'] = None
-        
+
         # Check if king is in check
-        return not self.is_in_check(colour, test_board)
+        return not self.is_in_check(colour, test_board, en_passant, castling)
     
-    def is_in_check(self, colour, board):
+    def is_in_check(self, colour, board, en_passant=USE_LIVE_STATE, castling=USE_LIVE_STATE):
         # Find king position
         king_square = self.find_king(colour, board)
         if not king_square:
             return False
-        
-        return self.is_square_attacked(king_square, colour, board)
+
+        return self.is_square_attacked(king_square, colour, board, en_passant, castling)
     
-    def is_square_attacked(self, square, defender_colour, board):
+    def is_square_attacked(self, square, defender_colour, board, en_passant=USE_LIVE_STATE, castling=USE_LIVE_STATE):
         attacker_colour = 'black' if defender_colour == 'white' else 'white'
         
         # Check all opponent pieces
@@ -368,7 +474,7 @@ class Chess():
                     if rank + direction == target_rank and abs(file - target_file) == 1:
                         return True
                 else:
-                    moves = self.get_pseudo_legal_moves(sq, board, include_castling=False)
+                    moves = self.get_pseudo_legal_moves(sq, board, include_castling=False, en_passant=en_passant, castling=castling)
                     if square in moves:
                         return True
         
@@ -553,13 +659,19 @@ class Chess():
         self.chessboard[targetSquare]['piece'] = piece_obj
         self.chessboard[sourceSquare]['piece'] = None
         
-        # Handle pawn promotion with UI
+        # Handle pawn promotion
         if piece_obj.piece_type == 'Pawn':
             target_file, target_rank = self.square_to_coords(targetSquare)
             if (self.player_turn == 'white' and target_rank == 7) or \
                (self.player_turn == 'black' and target_rank == 0):
-                # Call the pawn promotion UI
-                self.check_pawn_promotion(piece_obj, targetSquare)
+                if self.mode == 'bot' and self.player_turn != self.player_colour:
+                    # Ask the bot instead of opening the UI, defaulting to a
+                    # queen so a bot that returns nothing can't hang the game
+                    promote_to = self.bot.choose_promotion(board=self.chessboard, targetSquare=targetSquare, turn=self.player_turn, game=self) or 'q'
+                    self.check_pawn_promotion(piece_obj, targetSquare, promoteToValue=promote_to)
+                else:
+                    # Call the pawn promotion UI
+                    self.check_pawn_promotion(piece_obj, targetSquare)
         
         # Update check status
         opponent = 'black' if self.player_turn == 'white' else 'white'
