@@ -219,6 +219,7 @@ class GameUI():
 
             # Update the screen every frame
             self.update_screen(board=board)
+            self.draw_possible_mates(game)
             if start_pos:
                 piece = board[start_pos]["piece"]
                 if piece:
@@ -250,6 +251,13 @@ class GameUI():
                     temp_surface = pygame.Surface((70, 70), pygame.SRCALPHA)
                     pygame.draw.circle(temp_surface, (90, 90, 90, 128), (35, 35), 35, 4)
                     self.Screen.blit(temp_surface, (move_square.centerx - 35, move_square.centery - 35))
+
+    def draw_possible_mates(self, game):
+        king_pos = game.find_king(game.player_turn, game.chessboard)
+        square = game.chessboard[king_pos]['square']
+        temp_surface = pygame.Surface((70, 70), pygame.SRCALPHA)
+        pygame.draw.rect(temp_surface, (255, 255, 0, 64), (0, 0, 70, 70))
+        self.Screen.blit(temp_surface, (square.centerx - 35, square.centery - 35))
 
     def draw_board(self, board: dict):
         squares = [s["square"] for s in board.values()]
