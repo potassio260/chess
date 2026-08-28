@@ -1,6 +1,6 @@
 # Imports
 from abc import ABC, abstractmethod
-import torch, random
+import random
 
 PIECE_SQUARE_TABLES = {
     "Pawn": [
@@ -66,7 +66,7 @@ PIECE_SQUARE_TABLES = {
 }
 
 MATE = 10000
-MIN_MATE = 1000
+TOTAL_MATERIAL = 390
 END_GAME = 15
 
 # Bot class
@@ -101,17 +101,19 @@ class Bot(ABC):
     
     
 class Stopium(Bot):
-    def __init__(self, depth=3):
+    def __init__(self, depth=4):
         Bot.__init__(self)
         self.depth = depth
-        self.decay_rate = 5
-        self.material = None
+        self.turn_count = 0
 
-    def generate_move(self, possible_moves, board, turn, game):
+    def generate_move(self, possible_moves, board, turn, game, turn_count):
+        # Update turn counter
+        self.turn_count = turn_count
+        print(self.turn_count)
+
         # The root IS the live position, so the game's own state is correct here
         position = (board, turn, game.en_passant_square, game.castling_rights)
 
-        self.decay_rate += self.decay_rate
         best_move = None
         alpha = float('-inf')
         beta  = float('inf')
@@ -133,17 +135,17 @@ class Stopium(Bot):
         return best_move
 
     # Returns a SCORE, always from the point of view of whoever is to move
-    def search(self, position, depth, game, alpha, beta):
+    def search(self, position, depth, game, alpha, beta, own_material = TOTAL_MATERIAL):
         board, turn, en_passant, castling = position
-        possible_moves = game.all_possible_moves(turn, board, en_passant, castling)
+        possible_moves = game.all_possible_moves(turn, board, en_passant, castling) # TO-DO -> also counts total material + optimize this to be as efficient as possible 
+        turn_count = self.turn_count + (self.depth - depth)
 
+        # Calculate new value after decay
+        mate_score = (own_material // TOTAL_MATERIAL) * MATE - turn_count
         # No legal moves: we are either mated or stalemated
         if not possible_moves:
             if game.is_in_check(turn, board, en_passant, castling):
-                if MATE - self.decay_rate < MIN_MATE:
-                    return MIN_MATE
-                else:
-                    return -MATE + self.decay_rate
+                return -mate_score 
             return 0
 
         if depth == 0:
@@ -173,9 +175,9 @@ class Stopium(Bot):
         score = 0
         for pos, square_data in board.items():
             piece = square_data['piece']
-            file, rank = game.square_to_coords(pos)
             if piece is None:
-                continue        
+                continue
+            file, rank = game.square_to_coords(pos)  
             row = 7 - rank if piece.colour == 'white' else rank
             value = self.piece_cost[piece.piece_type] + PIECE_SQUARE_TABLES[piece.piece_type][row][file]
 
