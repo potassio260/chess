@@ -24,6 +24,7 @@ class Chess():
         self.move_history = []
         self.mode = mode
         self.player_colour = colour
+        self.turn_count = 0
         
         # TEMP
         if self.mode == 'bot':
@@ -57,7 +58,9 @@ class Chess():
                 # Check for checkmate or stalemate
                 if self.is_game_over():
                     quit()
-                
+
+                self.kings_nono_spot(self.player_turn, self.chessboard)
+
                 # check who is next to move
                 if self.player_colour == self.player_turn:
                     # Human move
@@ -81,13 +84,14 @@ class Chess():
                         case 'bot':
                             # Bot move
                             legal_moves = self.all_possible_moves(colour=self.player_turn, board=self.chessboard)
-                            sourceSquare, targetSquare = self.bot.generate_move(board=self.chessboard, possible_moves=legal_moves, turn=self.player_turn, game=self)
+                            sourceSquare, targetSquare = self.bot.generate_move(board=self.chessboard, possible_moves=legal_moves, turn=self.player_turn, game=self, turn_count=self.turn_count)
                             if sourceSquare and targetSquare:
                                 is_valid_move = self.validate_move(sourceSquare, targetSquare)
                         
             # Save move in history
             self.move_history.append((sourceSquare, targetSquare))
-            
+            self.turn_count += 1
+
             # Change turn
             self.player_turn = "black" if self.player_turn == "white" else "white"
             
@@ -116,8 +120,67 @@ class Chess():
             return True
         
         return False
-    
+
     def all_possible_moves(self, colour, board, en_passant=USE_LIVE_STATE, castling=USE_LIVE_STATE):
+        if en_passant is USE_LIVE_STATE:
+            en_passant = self.en_passant_square
+
+        king_square = self.find_king(colour, board)
+        if king_square is None:
+            return []
+
+        # Work out what's checking the king and what's pinned ONCE for this
+        # position, instead of copying the board for every candidate move
+        checks, pins = self.get_checks_and_pins(king_square, colour, board)
+        num_checkers = len(checks)
+
+        if num_checkers == 1:
+            # A single check is answered by capturing the checker or blocking it
+            checker_square, blocking = checks[0]
+            resolve = set(blocking) | {checker_square}
+        else:
+            # 0 checkers: no restriction. 2+: only the king can move.
+            resolve = None
+
+        legal_moves = []
+
+        for square, square_data in board.items():
+            piece_obj = square_data['piece']
+
+            # Skip empty squares and opponent pieces
+            if piece_obj is None or piece_obj.colour != colour:
+                continue
+
+            is_king = piece_obj.piece_type == 'King'
+
+            # Double check - nothing but a king move helps
+            if num_checkers >= 2 and not is_king:
+                continue
+
+            pseudo_legal = self.get_pseudo_legal_moves(square, board, en_passant=en_passant, castling=castling)
+            pin_ray = pins.get(square)
+
+            for target in pseudo_legal:
+                # King moves and en passant don't follow the pin/resolve rules,
+                # so verify them the old way (both are rare enough to be cheap)
+                if is_king or (piece_obj.piece_type == 'Pawn' and en_passant is not None and target == en_passant):
+                    if self.is_legal_move(square, target, board, en_passant=en_passant, castling=castling):
+                        legal_moves.append((square, target))
+                    continue
+
+                # A pinned piece may only move along the pin line
+                if pin_ray is not None and target not in pin_ray:
+                    continue
+
+                # In check - the move must capture or block the checker
+                if resolve is not None and target not in resolve:
+                    continue
+
+                legal_moves.append((square, target))
+
+        return legal_moves
+
+    def all_possible_moves_reference(self, colour, board, en_passant=USE_LIVE_STATE, castling=USE_LIVE_STATE):
         legal_moves = []
 
         # Iterate through all squares
@@ -163,6 +226,56 @@ class Chess():
 
         return moves
 
+    def get_checks_and_pins(self, king_square, turn, board):
+        checks = []
+        pins = {}
+
+        # Pawn calc values
+        file, rank = self.square_to_coords(king_square) 
+        value = 1 if turn == 'white' else -1
+        attack_rank = rank + value
+
+        # Pieces moves
+        _, rook_pinned, rook_checks = self.get_rook_moves(king_square, turn, board, True)
+        _, bishop_pinned, bishop_checks = self.get_bishop_moves(king_square, turn, board, True)
+        knight_moves = self.get_knight_moves(king_square, turn, board)
+        pawn_moves = []
+
+        # Calculate pawn moves
+        if 0 <= attack_rank < 8:
+            for df in (-1, 1):
+                attack_file = file + df
+                if 0 <= attack_file < 8:
+                    pawn_moves.append(self.coords_to_square(attack_file, attack_rank))
+
+        checks = rook_checks + bishop_checks
+        for pinned_square, allowed in rook_pinned + bishop_pinned:
+            pins[pinned_square] = allowed
+
+        # Knight moves                 
+        for pos in knight_moves:
+            square_data = board[pos]
+            piece = square_data['piece']
+            if piece is None:
+                continue
+
+            if piece.colour != turn:
+                if piece.piece_type == 'Knight':
+                    checks.append((pos, []))
+
+        # Pawn moves                 
+        for pos in pawn_moves:
+            square_data = board[pos]
+            piece = square_data['piece']
+            if piece is None:
+                continue
+
+            if piece.colour != turn:
+                if piece.piece_type == 'Pawn':
+                    checks.append((pos, []))
+
+        return (checks, pins)
+    
     def get_pawn_moves(self, square, colour, board, en_passant=USE_LIVE_STATE):
         if en_passant is USE_LIVE_STATE:
             en_passant = self.en_passant_square
@@ -237,16 +350,65 @@ class Chess():
                 new_rank += dr
         
         return moves
+
+    def catch_mates(self, square, colour, board, directions, slider_types):
+            file, rank = self.square_to_coords(square)
+            moves = []
+            pinned = []
+            checks = []
+            
+            for df, dr in directions:
+                skips = 1
+                temp = None
+                between = []
+                new_file, new_rank = file + df, rank + dr
+                while 0 <= new_file < 8 and 0 <= new_rank < 8:
+                    target_square = self.coords_to_square(new_file, new_rank)
+                    target = board[target_square]['piece']
+                    if target is None:
+                        moves.append(target_square)
+                        between.append(target_square)
+                    else:
+                        if target.colour != colour:
+                            moves.append(target_square)
+                            if target.piece_type in slider_types:
+                                if temp is None:
+                                    checks.append((target_square, list(between)))
+                                else:
+                                    pinned.append((temp, between + [target_square]))
+                            break
+                        else:
+                            if skips > 0:
+                                moves.append(target_square)
+                                skips -= 1
+                                temp = target_square
+                            else:
+                                break
+                    new_file += df
+                    new_rank += dr
+            
+            return moves, pinned, checks
     
-    def get_bishop_moves(self, square, colour, board):
-        return self.get_sliding_moves(square, colour, board, [(-1,-1), (-1,1), (1,-1), (1,1)])
+    def get_bishop_moves(self, square, colour, board, eval_pins = False):
+        bishop_vectors = [(-1,-1), (-1,1), (1,-1), (1,1)]
+
+        if eval_pins:
+            return self.catch_mates(square, colour, board, bishop_vectors, ('Queen', 'Bishop'))
+        return self.get_sliding_moves(square, colour, board, bishop_vectors)
     
-    def get_rook_moves(self, square, colour, board):
-        return self.get_sliding_moves(square, colour, board, [(-1,0), (1,0), (0,-1), (0,1)])
+    def get_rook_moves(self, square, colour, board, eval_pins = False):
+        rook_vectors = [(-1,0), (1,0), (0,-1), (0,1)]
+
+        if eval_pins:
+            return self.catch_mates(square, colour, board, rook_vectors, ('Queen', 'Rook'))
+        return self.get_sliding_moves(square, colour, board, rook_vectors)
     
-    def get_queen_moves(self, square, colour, board):
-        return self.get_sliding_moves(square, colour, board, 
-                                       [(-1,-1), (-1,1), (1,-1), (1,1), (-1,0), (1,0), (0,-1), (0,1)])
+    def get_queen_moves(self, square, colour, board, eval_pins = False):
+        queen_vecors = [(-1,-1), (-1,1), (1,-1), (1,1), (-1,0), (1,0), (0,-1), (0,1)]
+
+        if eval_pins:
+            return self.catch_mates(square, colour, board, queen_vecors, ('Queen'))
+        return self.get_sliding_moves(square, colour, board, queen_vecors)
     
     def get_king_moves(self, square, colour, board, include_castling=True, en_passant=USE_LIVE_STATE, castling=USE_LIVE_STATE):
         if castling is USE_LIVE_STATE:
@@ -479,6 +641,10 @@ class Chess():
                         return True
         
         return False
+
+    def kings_nono_spot(self, defender_colour, board):
+        king_square = self.find_king(defender_colour, board)
+        print(king_square)
     
     def find_king(self, colour, board):
         for square, square_data in board.items():
