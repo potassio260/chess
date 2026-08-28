@@ -9,7 +9,7 @@ The engine accurately handles all complex edge cases of chess, and the long-term
 - **Complete FIDE Rules:** Fully supports castling, pawn promotion, and en passant.
 - **Game State Detection:** Accurate check, checkmate, and stalemate validation.
 - **Visual Feedback:** Interactive UI with legal move highlighting and clean graphics.
-- **AI Sandbox (WIP):** Groundwork laid for plugging in custom AI agents.
+- **AI Sandbox:** Groundwork laid for plugging in custom AI agents + Working 1900 rated chess AI (still improving).
 
     <img src="screenshots/enpassant.gif" width="400"/>
                    
